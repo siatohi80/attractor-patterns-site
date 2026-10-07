@@ -60,12 +60,13 @@ label{display:grid;gap:4px;font-size:14px;color:var(--md-on-surface)}
 label .row{display:flex;justify-content:space-between;gap:8px}
 label output{font:500 12px/16px var(--mono);color:var(--md-primary);font-variant-numeric:tabular-nums}
 /* outlined select */
-select{width:100%;font:400 16px/24px var(--font);height:48px;padding:0 40px 0 14px;border:1px solid var(--md-outline);border-radius:4px;background:transparent;color:var(--md-on-surface);
+select{width:100%;font:400 16px/24px var(--font);height:48px;padding:0 40px 0 14px;border:1px solid var(--md-outline);border-radius:4px;background-color:var(--md-surface-low);color:var(--md-on-surface);
   appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
   background-position:calc(100% - 20px) 21px,calc(100% - 15px) 21px;background-size:5px 5px;background-repeat:no-repeat}
 select:hover{border-color:var(--md-on-surface)}
 select:focus{outline:none;border:2px solid var(--md-primary);padding-left:13px}
-select option{background:var(--md-surface-c);color:var(--md-on-surface)}
+select option,select optgroup{background-color:var(--md-surface-c);color:var(--md-on-surface);font-style:normal}
+select optgroup{color:var(--md-primary);font-weight:500}
 /* slider */
 input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:20px;background:transparent;margin:0;--p:50%}
 input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--md-primary) var(--p),var(--md-secondary-container) var(--p))}

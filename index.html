@@ -119,7 +119,7 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
         <option value="custom" disabled>Custom (drawn)</option>
       </select>
       <div class="btns"><button id="draw" aria-pressed="false">Draw outline</button></div>
-      <div class="btns"><button id="drawHole" aria-pressed="false">Draw hole</button><button id="addHole">+ Round hole</button><button id="removeHole">Remove hole</button></div>
+      <div class="btns"><button id="drawHole" aria-pressed="false">Draw hole</button><button id="addHole">+ Round hole</button><button id="removeHole" title="Removes the selected hole, or the last one added if none is selected">Remove hole</button></div>
       <label for="margin"><span class="row">Edge margin <output id="marginO"></output></span><input id="margin" type="range" min="0" max="40" step="1" value="8"></label>
       <label class="check"><input id="smooth" type="checkbox"> Smooth curves through points</label>
       <p class="hint">Drag the squares to reshape. Double-click a square to switch that point between sharp and smooth (round handles are smooth). Drag inside a hole to move it; click a hole to select it.</p>
@@ -504,10 +504,10 @@ function finishDraw(){const d=S.drawing;if(d&&d.pts.length>=3){const C=d.pts.map
 $('draw').onclick=()=>S.drawing?cancelDraw():startDraw('outline');
 $('drawHole').onclick=()=>S.drawing?cancelDraw():startDraw('hole');
 $('addHole').onclick=()=>{const[x0,y0,x1,y1]=bbox(S.outline);S.holes.push(roundHole((x0+x1)/2,(y0+y1)/2,Math.min(x1-x0,y1-y0)*0.12));S.selHole=S.holes.length-1;S.sel=-1;buildOutline();RD.dirty=true;schedule(true);};
-function removeHole(){if(S.selHole<0)return;S.holes.splice(S.selHole,1);S.selHole=-1;buildOutline();RD.dirty=true;schedule(true);}
+function removeHole(){if(!S.holes.length)return;if(S.selHole<0||!S.holes[S.selHole])S.selHole=S.holes.length-1;S.holes.splice(S.selHole,1);S.selHole=-1;buildOutline();RD.dirty=true;schedule(true);}
 $('removeHole').onclick=removeHole;
 window.addEventListener('keydown',e=>{if(S.drawing){if(e.key==='Enter')finishDraw();if(e.key==='Escape')cancelDraw();return;}
-  if((e.key==='Delete'||e.key==='Backspace')&&document.activeElement===document.body){if(S.sel>=0){removeSel();e.preventDefault();}else if(S.selHole>=0){removeHole();e.preventDefault();}}});
+  if((e.key==='Delete'||e.key==='Backspace')&&!/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)){if(S.sel>=0){removeSel();e.preventDefault();}else if(S.selHole>=0){removeHole();e.preventDefault();}}});
 cv.addEventListener('dblclick',e=>{if(S.drawing){finishDraw();return;}const h=hit(toMM(e));if(h&&h.t==='ov'){S.ctrl[h.i].sm=!S.ctrl[h.i].sm;buildOutline();setShapeSel('custom');RD.dirty=true;schedule(true);}else if(h&&h.t==='hv'){const c=S.holes[h.h].ctrl[h.i];c.sm=!c.sm;buildOutline();RD.dirty=true;schedule(true);}});
 function removeSel(){if(S.sel<0)return;S.atts.splice(S.sel,1);S.sel=-1;RD.dirty=true;schedule(true);}
 $('remove').onclick=removeSel;

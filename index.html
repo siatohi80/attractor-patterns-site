@@ -59,7 +59,7 @@ button:hover{border-color:var(--muted)}
 button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ramp{height:8px;border-radius:4px;background:linear-gradient(90deg,rgb(37,99,235),rgb(128,68,160),rgb(220,38,38))}
+.ramp{height:8px;border-radius:4px;background:linear-gradient(90deg,rgb(37,99,235) 0%,rgb(250,204,21) 40%,rgb(249,115,22) 70%,rgb(220,38,38) 100%)}
 .ramplbl{display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted)}
 .hint{font-size:.8rem;color:var(--muted);margin:0}
 footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
@@ -119,9 +119,10 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
         <option value="custom" disabled>Custom (drawn)</option>
       </select>
       <div class="btns"><button id="draw" aria-pressed="false">Draw outline</button></div>
+      <div class="btns"><button id="drawHole" aria-pressed="false">Draw hole</button><button id="addHole">+ Round hole</button><button id="removeHole">Remove hole</button></div>
       <label for="margin"><span class="row">Edge margin <output id="marginO"></output></span><input id="margin" type="range" min="0" max="40" step="1" value="8"></label>
       <label class="check"><input id="smooth" type="checkbox"> Smooth curves through points</label>
-      <p class="hint">Drag the squares to reshape. Double-click a square to switch that point between sharp and smooth (round handles are smooth).</p>
+      <p class="hint">Drag the squares to reshape. Double-click a square to switch that point between sharp and smooth (round handles are smooth). Drag inside a hole to move it; click a hole to select it.</p>
     </fieldset>
 
     <fieldset>
@@ -143,7 +144,7 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
 
     <fieldset>
       <legend>Color</legend>
-      <label class="check"><input id="color" type="checkbox"> Blue to red by closeness</label>
+      <label class="check"><input id="color" type="checkbox"> Color by closeness (blue, yellow, orange, red)</label>
       <div class="ramp" aria-hidden="true"></div>
       <div class="ramplbl"><span>Far</span><span>Near the attractor</span></div>
     </fieldset>
@@ -159,7 +160,7 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
     <fieldset>
       <legend>Export</legend>
       <div class="btns"><button class="primary" id="exSvg">SVG</button><button class="primary" id="exDxf">DXF</button><button class="primary" id="exPng">PNG</button></div>
-      <p class="hint">SVG and DXF are in millimetres. DXF layers: BORDER, CUT, GROOVE (slot centrelines), FACETS.</p>
+      <p class="hint">SVG and DXF are in millimetres. DXF layers: BORDER (outline and holes), CUT, GROOVE (slot centrelines), FACETS.</p>
     </fieldset>
   </aside>
 </main>
@@ -181,7 +182,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t;
 const S={
   pattern:'honey', atts:[{t:'line',a:[110,250],b:[530,110]},{t:'point',a:[470,250]}], sel:-1,
   R:220, fall:'smooth', comb:'max', inv:false, align:false, showField:true, color:false,
-  s:24, b:2, m:2, margin:8, fillet:1, seed:7, ctrl:null, outline:null, outlineVer:0, smoothNew:false, drawing:null
+  s:24, b:2, m:2, margin:8, fillet:1, seed:7, ctrl:null, outline:null, holes:[], selHole:-1, outlineVer:0, smoothNew:false, drawing:null
 };
 
 // ---------- outline presets ----------
@@ -196,17 +197,19 @@ function presetOutline(k){
 }
 function sharp(a){return a.map(p=>({p,sm:false}));}
 // Closed Catmull-Rom through control points; a sharp point keeps a corner.
-function buildOutline(){
-  const C=S.ctrl,n=C.length,o=[];
-  if(!C.some(c=>c.sm)){S.outline=C.map(c=>c.p.slice());S.outlineVer++;return;}
+function buildOutline(){S.outline=curveOf(S.ctrl);for(const h of S.holes)h.poly=curveOf(h.ctrl);S.outlineVer++;}
+function curveOf(C){
+  const n=C.length,o=[];
+  if(!C.some(c=>c.sm))return C.map(c=>c.p.slice());
   for(let i=0;i<n;i++){
     const P1=C[i],P2=C[(i+1)%n],P0=P1.sm?C[(i+n-1)%n]:P1,P3=P2.sm?C[(i+2)%n]:P2;
     const L=Math.hypot(P2.p[0]-P1.p[0],P2.p[1]-P1.p[1]),N=Math.max(2,Math.min(40,Math.ceil(L/6)));
     for(let k=0;k<N;k++){const t=k/N,t2=t*t,t3=t2*t;const f=(a,b,c,d)=>0.5*(2*b+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
       o.push([clamp(f(P0.p[0],P1.p[0],P2.p[0],P3.p[0]),0,PW),clamp(f(P0.p[1],P1.p[1],P2.p[1],P3.p[1]),0,PH)]);}
   }
-  S.outline=o;S.outlineVer++;
+  return o;
 }
+function roundHole(x,y,r){const o=[];for(let i=0;i<8;i++){const a=i/8*Math.PI*2;o.push({p:[x+r*Math.cos(a),y+r*Math.sin(a)],sm:true});}return{ctrl:o,poly:null};}
 function rdp(pts,tol){if(pts.length<3)return pts;let dm=0,ix=0;const A=pts[0],B=pts[pts.length-1];for(let i=1;i<pts.length-1;i++){const d=segDist(pts[i][0],pts[i][1],A,B);if(d>dm){dm=d;ix=i;}}
   if(dm<=tol)return[A,B];return rdp(pts.slice(0,ix+1),tol).slice(0,-1).concat(rdp(pts.slice(ix),tol));}
 S.ctrl=presetOutline('grille');
@@ -252,7 +255,8 @@ function obround(x,y,L,w,ang){const r=w/2,h=Math.max(L/2-r,0),o=[],c=Math.cos(an
 function segDist(px,py,a,b){const bx=b[0]-a[0],by=b[1]-a[1],L2=bx*bx+by*by||1;let t=((px-a[0])*bx+(py-a[1])*by)/L2;t=clamp(t,0,1);return Math.hypot(px-a[0]-t*bx,py-a[1]-t*by);}
 function inPoly(x,y,p){let c=false;for(let i=0,j=p.length-1;i<p.length;j=i++){const a=p[i],b=p[j];if(((a[1]>y)!==(b[1]>y))&&(x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0]))c=!c;}return c;}
 function edgeDist(x,y,p){let d=1e9;for(let i=0,n=p.length;i<n;i++)d=Math.min(d,segDist(x,y,p[i],p[(i+1)%n]));return d;}
-function fitsPt(x,y,extra){return inPoly(x,y,S.outline)&&edgeDist(x,y,S.outline)>=S.margin+(extra||0);}
+function inside(x,y){if(!inPoly(x,y,S.outline))return false;for(const h of S.holes)if(inPoly(x,y,h.poly))return false;return true;}
+function fitsPt(x,y,extra){const m=S.margin+(extra||0);if(!inside(x,y)||edgeDist(x,y,S.outline)<m)return false;for(const h of S.holes)if(edgeDist(x,y,h.poly)<m)return false;return true;}
 function bbox(p){let a=1e9,b=1e9,c=-1e9,d=-1e9;for(const q of p){a=Math.min(a,q[0]);b=Math.min(b,q[1]);c=Math.max(c,q[0]);d=Math.max(d,q[1]);}return[a,b,c,d];}
 function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 
@@ -288,7 +292,7 @@ function dart(radFn,pairFn,maxPair,tries,rng){
   const B=outlineBox(),cell=Math.max(maxPair,1),cols=Math.ceil((B.x1-B.x0)/cell)+3,grid=new Map(),pts=[];
   for(let t=0;t<tries;t++){
     const x=B.x0+rng()*(B.x1-B.x0),y=B.y0+rng()*(B.y1-B.y0);
-    if(!inPoly(x,y,S.outline)) continue;
+    if(!inside(x,y)) continue;
     const r=radFn(x,y),gx=Math.floor((x-B.x0)/cell)+1,gy=Math.floor((y-B.y0)/cell)+1;let ok=true;
     for(let ix=gx-1;ix<=gx+1&&ok;ix++)for(let iy=gy-1;iy<=gy+1&&ok;iy++){const l=grid.get(ix+iy*cols);if(l)for(const q of l){if(Math.hypot(q.x-x,q.y-y)<pairFn(r,q.r)){ok=false;break;}}}
     if(!ok) continue;
@@ -345,7 +349,8 @@ const PATTERNS=[
  {id:'delaunay',name:'Triangulated panels',group:'Cellular',drive:'Opening size inside each triangle: large near the attractor, small far away.',make:'Thin triangles give unusable openings; anything below the minimum hole size is removed.',
   build(rng){const s=S.s,sep=(x,y)=>s*lerp(2,0.85,field(x,y).f),D=dart(sep,(a,b)=>(a+b)/2,s*2,Math.round(area(S.outline)/(s*s)*30),rng),P=D.pts.map(p=>[p.x,p.y]);
     const per=perim(S.outline),n=S.outline.length;for(let i=0;i<n;i++){const A=S.outline[i],B=S.outline[(i+1)%n],L=Math.hypot(B[0]-A[0],B[1]-A[1]),k=Math.max(1,Math.round(L/(s*1.2)));for(let j=0;j<k;j++)P.push([A[0]+(B[0]-A[0])*j/k,A[1]+(B[1]-A[1])*j/k]);}
-    const o=[];let dr=0;for(const t of delaunay(P)){const[cx,cy]=centroid(t);if(!inPoly(cx,cy,S.outline))continue;const f=field(cx,cy).f,ri=inDia(t)/2,d=S.b/2+(1-(0.2+0.8*f))*Math.max(ri-S.b/2,0),h=inset(t,d);
+    for(const h of S.holes){const hp=h.poly,m=hp.length;for(let i=0;i<m;i++){const A=hp[i],B=hp[(i+1)%m],L=Math.hypot(B[0]-A[0],B[1]-A[1]),k=Math.max(1,Math.round(L/(s*1.2)));for(let j=0;j<k;j++)P.push([A[0]+(B[0]-A[0])*j/k,A[1]+(B[1]-A[1])*j/k]);}}
+    const o=[];let dr=0;for(const t of delaunay(P)){const[cx,cy]=centroid(t);if(!inside(cx,cy))continue;const f=field(cx,cy).f,ri=inDia(t)/2,d=S.b/2+(1-(0.2+0.8*f))*Math.max(ri-S.b/2,0),h=inset(t,d);
       if(h.length<3)continue;if(inDia(h)<S.m){dr++;continue;}o.push({k:'poly',p:h,f});}return{shapes:o,dropped:dr};}},
  {id:'morph',name:'Shape morph (circle to square)',group:'Grid + shape',drive:'Blend from circle (far) to rounded square (near), plus size.',make:'Square shapes have tighter corner gaps than circles; the bridge is checked at the corners, not only between centres.',
   build(){const s=S.s,o=[];let dr=0;for(const[x,y]of squareCenters(s)){const{f}=field(x,y),r=(s-S.b)/2*(0.4+0.6*f);if(2*r<S.m){dr++;continue;}o.push({k:'poly',p:superEllipse(x,y,r,lerp(2,9,f),48),f,noRound:true});}return{shapes:o,dropped:dr};}},
@@ -395,7 +400,7 @@ function shapeFits(sh){
   if(sh.k==='circ') return fitsPt(sh.x,sh.y,sh.r);
   if(sh.k==='seg') return true;
   const ex=sh.k==='line'?sh.w/2:0;for(const q of sh.p)if(!fitsPt(q[0],q[1],ex))return false;
-  if(sh.k==='poly'){const c=centroid(sh.p);if(!inPoly(c[0],c[1],S.outline))return false;}
+  if(sh.k==='poly'){const c=centroid(sh.p);if(!inside(c[0],c[1]))return false;}
   return true;
 }
 function rebuild(){
@@ -408,7 +413,9 @@ function rebuild(){
 }
 
 // ---------- colors ----------
-function ramp(f){return[Math.round(lerp(37,220,f)),Math.round(lerp(99,38,f)),Math.round(lerp(235,38,f))];}
+// blue -> yellow -> orange -> red
+const RAMP=[[0,[37,99,235]],[0.4,[250,204,21]],[0.7,[249,115,22]],[1,[220,38,38]]];
+function ramp(f){f=clamp(f,0,1);for(let i=1;i<RAMP.length;i++){const[a,ca]=RAMP[i-1],[b,cb]=RAMP[i];if(f<=b){const t=(f-a)/(b-a);return ca.map((v,j)=>Math.round(lerp(v,cb[j],t)));}}return RAMP[RAMP.length-1][1].slice();}
 const rgb=a=>`rgb(${a[0]},${a[1]},${a[2]})`;
 const hex=a=>'#'+a.map(v=>v.toString(16).padStart(2,'0')).join('');
 function facetColor(sh,useColor){const base=useColor?ramp(sh.f):[150,158,166];const k=0.35+0.85*sh.shade;return base.map(v=>Math.round(clamp(v*k,0,255)));}
@@ -433,14 +440,16 @@ function renderScene(g,k,opts){
     else if(sh.k==='facet'){g.beginPath();tracePoly(g,sh.p,k);g.fillStyle=rgb(facetColor(sh,S.color));g.fill();g.strokeStyle='rgba(0,0,0,.25)';g.lineWidth=Math.max(0.5,0.15*k);g.stroke();}
     else if(sh.k==='line'){g.beginPath();g.moveTo(sh.p[0][0]*k,sh.p[0][1]*k);for(let i=1;i<sh.p.length;i++)g.lineTo(sh.p[i][0]*k,sh.p[i][1]*k);g.strokeStyle=col;g.lineWidth=sh.w*k;g.lineCap='round';g.lineJoin='round';g.stroke();}
   }
-  g.beginPath();tracePoly(g,S.outline,k);g.strokeStyle=opts.outlineColor;g.lineWidth=Math.max(1,0.6*k);g.stroke();
+  for(const h of S.holes){g.beginPath();tracePoly(g,h.poly,k);g.fillStyle=opts.metal;g.fill();}
+  g.beginPath();tracePoly(g,S.outline,k);for(const h of S.holes)tracePoly(g,h.poly,k);g.strokeStyle=opts.outlineColor;g.lineWidth=Math.max(1,0.6*k);g.stroke();
 }
 function parseColor(c){const d=document.createElement('canvas').getContext('2d');d.fillStyle=c;const v=d.fillStyle;if(v[0]==='#')return[1,3,5].map(i=>parseInt(v.slice(i,i+2),16));const m=v.match(/\d+/g);return m?m.slice(0,3).map(Number):[0,0,0];}
 function draw(){
   const k=K;renderScene(ctx,k,{metal:css('--metal'),sheet:css('--sheet'),hole:css('--hole'),field:S.showField,fieldColor:css('--field'),outlineColor:css('--outline')});
   const acc=css('--accent');
   // outline vertex handles
-  if(!S.drawing){ctx.fillStyle=css('--surface');ctx.strokeStyle=acc;ctx.lineWidth=1.5;for(const c of S.ctrl){const q=c.p;ctx.beginPath();if(c.sm)ctx.arc(q[0]*k,q[1]*k,5,0,7);else ctx.rect(q[0]*k-4,q[1]*k-4,8,8);ctx.fill();ctx.stroke();}}
+  if(!S.drawing){ctx.fillStyle=css('--surface');ctx.strokeStyle=acc;ctx.lineWidth=1.5;for(const c of S.ctrl.concat(...S.holes.map(h=>h.ctrl))){const q=c.p;ctx.beginPath();if(c.sm)ctx.arc(q[0]*k,q[1]*k,5,0,7);else ctx.rect(q[0]*k-4,q[1]*k-4,8,8);ctx.fill();ctx.stroke();}
+    if(S.selHole>=0&&S.holes[S.selHole]){ctx.beginPath();tracePoly(ctx,S.holes[S.selHole].poly,k);ctx.setLineDash([6,4]);ctx.lineWidth=2.5;ctx.stroke();ctx.setLineDash([]);}}
   // drawing preview
   if(S.drawing){const d=S.drawing;ctx.strokeStyle=acc;ctx.fillStyle=acc;ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.beginPath();d.pts.forEach((q,i)=>ctx[i?'lineTo':'moveTo'](q[0]*k,q[1]*k));if(d.hover&&d.pts.length)ctx.lineTo(d.hover[0]*k,d.hover[1]*k);ctx.stroke();ctx.setLineDash([]);
     d.pts.forEach((q,i)=>{ctx.beginPath();ctx.arc(q[0]*k,q[1]*k,i?(d.sm[i]?3:4):7,0,7);ctx.fill();});}
@@ -453,7 +462,7 @@ function draw(){
 function updateStats(){
   let n=0,a=0;
   if(built.raster&&RD.V){let on=0,tot=0;for(let i=0;i<RD.V.length;i++){if(RD.M[i]){tot++;if(RD.V[i]>0.22)on++;}}a=tot?on/tot:0;n='–';}
-  else{const oa=Math.abs(area(S.outline));let s=0;for(const sh of built.shapes){if(sh.k==='circ'){s+=Math.PI*sh.r*sh.r;n++;}else if(sh.k==='poly'){s+=Math.abs(area(sh.p));n++;}else if(sh.k==='line'){let L=0;for(let i=1;i<sh.p.length;i++)L+=Math.hypot(sh.p[i][0]-sh.p[i-1][0],sh.p[i][1]-sh.p[i-1][1]);s+=L*sh.w;n++;}}
+  else{const oa=Math.abs(area(S.outline))-S.holes.reduce((a,h)=>a+Math.abs(area(h.poly)),0);let s=0;for(const sh of built.shapes){if(sh.k==='circ'){s+=Math.PI*sh.r*sh.r;n++;}else if(sh.k==='poly'){s+=Math.abs(area(sh.p));n++;}else if(sh.k==='line'){let L=0;for(let i=1;i<sh.p.length;i++)L+=Math.hypot(sh.p[i][0]-sh.p[i-1][0],sh.p[i][1]-sh.p[i-1][1]);s+=L*sh.w;n++;}}
     a=oa?s/oa:0;if(S.pattern==='jewel'){n=built.shapes.length/4;a=0;}}
   $('sCount').textContent=n;$('sArea').textContent=S.pattern==='jewel'?'emboss':(a*100).toFixed(1)+'%';
   const[x0,y0,x1,y1]=bbox(S.outline);$('sSize').textContent=Math.round(x1-x0)+'×'+Math.round(y1-y0);
@@ -469,29 +478,37 @@ function hit(p){const tol=14*PW/cv.getBoundingClientRect().width;
   for(let i=S.atts.length-1;i>=0;i--){const A=S.atts[i];for(const key of A.t==='point'?['a']:['a','b'])if(Math.hypot(A[key][0]-p[0],A[key][1]-p[1])<tol)return{t:'att',i,key};
     if(A.t==='line'&&segDist(p[0],p[1],A.a,A.b)<tol*0.7)return{t:'att',i,key:'both'};}
   for(let i=0;i<S.ctrl.length;i++)if(Math.hypot(S.ctrl[i].p[0]-p[0],S.ctrl[i].p[1]-p[1])<tol)return{t:'ov',i};
+  for(let h=S.holes.length-1;h>=0;h--){const C=S.holes[h].ctrl;for(let i=0;i<C.length;i++)if(Math.hypot(C[i].p[0]-p[0],C[i].p[1]-p[1])<tol)return{t:'hv',h,i};}
+  for(let h=S.holes.length-1;h>=0;h--)if(inPoly(p[0],p[1],S.holes[h].poly))return{t:'hole',h};
   return null;}
 cv.addEventListener('pointerdown',e=>{const p=toMM(e);
   if(S.drawing){const d=S.drawing;const tol=14*PW/cv.getBoundingClientRect().width;if(d.pts.length>=3&&Math.hypot(d.pts[0][0]-p[0],d.pts[0][1]-p[1])<tol){finishDraw();return;}d.pts.push(p);d.sm.push(S.smoothNew);d.down=true;d.strokeStart=d.pts.length-1;cv.setPointerCapture(e.pointerId);draw();return;}
-  const h=hit(p);if(!h){S.sel=-1;draw();return;}
-  if(h.t==='att')S.sel=h.i;drag=h;last=p;cv.setPointerCapture(e.pointerId);draw();});
+  const h=hit(p);if(!h){S.sel=-1;S.selHole=-1;draw();return;}
+  if(h.t==='att'){S.sel=h.i;S.selHole=-1;}if(h.t==='hv'||h.t==='hole'){S.selHole=h.h;S.sel=-1;}drag=h;last=p;cv.setPointerCapture(e.pointerId);draw();});
 cv.addEventListener('pointermove',e=>{const p=toMM(e);
   if(S.drawing){const d=S.drawing;d.hover=p;if(d.down){const q=d.pts[d.pts.length-1];if(Math.hypot(q[0]-p[0],q[1]-p[1])>2.5){d.pts.push(p);d.sm.push(true);d.free=true;}}draw();return;}
   if(!drag){const h=hit(p);cv.style.cursor=h?'grab':'crosshair';return;}
   const dx=p[0]-last[0],dy=p[1]-last[1];last=p;
   if(drag.t==='ov'){S.ctrl[drag.i].p=[clamp(p[0],0,PW),clamp(p[1],0,PH)];buildOutline();setShapeSel('custom');}
+  else if(drag.t==='hv'){S.holes[drag.h].ctrl[drag.i].p=[clamp(p[0],0,PW),clamp(p[1],0,PH)];buildOutline();}
+  else if(drag.t==='hole'){for(const c of S.holes[drag.h].ctrl)c.p=[c.p[0]+dx,c.p[1]+dy];buildOutline();}
   else{const A=S.atts[drag.i];if(drag.key==='both'){A.a=[A.a[0]+dx,A.a[1]+dy];A.b=[A.b[0]+dx,A.b[1]+dy];}else A[drag.key]=[clamp(p[0],0,PW),clamp(p[1],0,PH)];}
   if(PMAP[S.pattern].raster)RD.dirty=true;schedule(true);});
 ['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{drag=null;const d=S.drawing;if(d&&d.down){d.down=false;
   // simplify the freehand stroke just drawn into a few smooth control points
   const st=d.strokeStart,stroke=d.pts.slice(st);if(stroke.length>2){const simp=rdp(stroke,2.5);d.pts=d.pts.slice(0,st).concat(simp);d.sm=d.sm.slice(0,st).concat(simp.map((_,i)=>i>0||d.sm[st]));d.sm[st]=d.sm[st]||false;}draw();}}));
 function setShapeSel(v){$('shape').value=v;}
-function startDraw(){S.drawing={pts:[],sm:[],hover:null,down:false,free:false};$('draw').setAttribute('aria-pressed','true');$('banner').hidden=false;draw();}
-function cancelDraw(){S.drawing=null;$('draw').setAttribute('aria-pressed','false');$('banner').hidden=true;draw();}
-function finishDraw(){const d=S.drawing;if(d&&d.pts.length>=3){S.ctrl=d.pts.map((q,i)=>({p:[clamp(q[0],0,PW),clamp(q[1],0,PH)],sm:!!d.sm[i]}));buildOutline();setShapeSel('custom');}cancelDraw();if(RD.U)RD.dirty=true;schedule(true);}
-$('draw').onclick=()=>S.drawing?cancelDraw():startDraw();
+function startDraw(target){S.drawing={pts:[],sm:[],hover:null,down:false,free:false,target:target||'outline'};$(target==='hole'?'drawHole':'draw').setAttribute('aria-pressed','true');$('banner').hidden=false;draw();}
+function cancelDraw(){S.drawing=null;$('draw').setAttribute('aria-pressed','false');$('drawHole').setAttribute('aria-pressed','false');$('banner').hidden=true;draw();}
+function finishDraw(){const d=S.drawing;if(d&&d.pts.length>=3){const C=d.pts.map((q,i)=>({p:[clamp(q[0],0,PW),clamp(q[1],0,PH)],sm:!!d.sm[i]}));if(d.target==='hole'){S.holes.push({ctrl:C,poly:null});S.selHole=S.holes.length-1;}else{S.ctrl=C;setShapeSel('custom');}buildOutline();}cancelDraw();if(RD.U)RD.dirty=true;schedule(true);}
+$('draw').onclick=()=>S.drawing?cancelDraw():startDraw('outline');
+$('drawHole').onclick=()=>S.drawing?cancelDraw():startDraw('hole');
+$('addHole').onclick=()=>{const[x0,y0,x1,y1]=bbox(S.outline);S.holes.push(roundHole((x0+x1)/2,(y0+y1)/2,Math.min(x1-x0,y1-y0)*0.12));S.selHole=S.holes.length-1;S.sel=-1;buildOutline();RD.dirty=true;schedule(true);};
+function removeHole(){if(S.selHole<0)return;S.holes.splice(S.selHole,1);S.selHole=-1;buildOutline();RD.dirty=true;schedule(true);}
+$('removeHole').onclick=removeHole;
 window.addEventListener('keydown',e=>{if(S.drawing){if(e.key==='Enter')finishDraw();if(e.key==='Escape')cancelDraw();return;}
-  if((e.key==='Delete'||e.key==='Backspace')&&S.sel>=0&&document.activeElement===document.body){removeSel();e.preventDefault();}});
-cv.addEventListener('dblclick',e=>{if(S.drawing){finishDraw();return;}const h=hit(toMM(e));if(h&&h.t==='ov'){S.ctrl[h.i].sm=!S.ctrl[h.i].sm;buildOutline();setShapeSel('custom');RD.dirty=true;schedule(true);}});
+  if((e.key==='Delete'||e.key==='Backspace')&&document.activeElement===document.body){if(S.sel>=0){removeSel();e.preventDefault();}else if(S.selHole>=0){removeHole();e.preventDefault();}}});
+cv.addEventListener('dblclick',e=>{if(S.drawing){finishDraw();return;}const h=hit(toMM(e));if(h&&h.t==='ov'){S.ctrl[h.i].sm=!S.ctrl[h.i].sm;buildOutline();setShapeSel('custom');RD.dirty=true;schedule(true);}else if(h&&h.t==='hv'){const c=S.holes[h.h].ctrl[h.i];c.sm=!c.sm;buildOutline();RD.dirty=true;schedule(true);}});
 function removeSel(){if(S.sel<0)return;S.atts.splice(S.sel,1);S.sel=-1;RD.dirty=true;schedule(true);}
 $('remove').onclick=removeSel;
 $('addPoint').onclick=()=>{S.atts.push({t:'point',a:[PW/2+(Math.random()-.5)*120,PH/2+(Math.random()-.5)*80]});S.sel=S.atts.length-1;RD.dirty=true;schedule(true);};
@@ -525,7 +542,7 @@ function exportShapes(){if(built.raster)return rdOutline();return built.shapes;}
 function toSVG(){
   const sh=exportShapes(),o=[];const ptsStr=p=>p.map(q=>n3(q[0])+','+n3(q[1])).join(' ');
   o.push(`<?xml version="1.0" encoding="UTF-8"?>`,`<svg xmlns="http://www.w3.org/2000/svg" width="${PW}mm" height="${PH}mm" viewBox="0 0 ${PW} ${PH}">`,
-    `<!-- Attractor Patterns: ${PMAP[S.pattern].name}. Units: mm. -->`,`<g id="BORDER" fill="none" stroke="#ff0000" stroke-width="0.2"><polygon points="${ptsStr(S.outline)}"/></g>`,`<g id="CUT">`);
+    `<!-- Attractor Patterns: ${PMAP[S.pattern].name}. Units: mm. -->`,`<g id="BORDER" fill="none" stroke="#ff0000" stroke-width="0.2"><polygon points="${ptsStr(S.outline)}"/>${S.holes.map(h=>`<polygon points="${ptsStr(h.poly)}"/>`).join('')}</g>`,`<g id="CUT">`);
   for(const s of sh){const c=S.color?hex(ramp(s.f)):'#000000';
     if(s.k==='circ')o.push(`<circle cx="${n3(s.x)}" cy="${n3(s.y)}" r="${n3(s.r)}" fill="${c}"/>`);
     else if(s.k==='poly')o.push(`<polygon points="${ptsStr(s.p)}" fill="${c}"/>`);
@@ -535,14 +552,14 @@ function toSVG(){
   o.push('</g></svg>');return o.join('\n');
 }
 function toDXF(){
-  const L=[],Y=y=>n3(PH-y),aci=f=>!S.color?7:(f<0.34?5:f<0.67?6:1);
+  const L=[],Y=y=>n3(PH-y),aci=f=>!S.color?7:(f<0.25?5:f<0.55?2:f<0.85?30:1);
   const add=(...a)=>L.push(...a);
   add('0','SECTION','2','HEADER','9','$ACADVER','1','AC1009','9','$INSUNITS','70','4','0','ENDSEC');
   add('0','SECTION','2','TABLES','0','TABLE','2','LAYER','70','4');
   for(const[n,c]of[['BORDER',1],['CUT',7],['GROOVE',3],['FACETS',8]])add('0','LAYER','2',n,'70','0','62',String(c),'6','CONTINUOUS');
   add('0','ENDTAB','0','ENDSEC','0','SECTION','2','ENTITIES');
   const poly=(p,layer,closed,col)=>{add('0','POLYLINE','8',layer,'62',String(col),'66','1','70',closed?'1':'0','10','0','20','0','30','0');for(const q of p)add('0','VERTEX','8',layer,'10',n3(q[0]),'20',Y(q[1]),'30','0');add('0','SEQEND','8',layer);};
-  poly(S.outline,'BORDER',true,1);
+  poly(S.outline,'BORDER',true,1);for(const h of S.holes)poly(h.poly,'BORDER',true,1);
   for(const s of exportShapes()){
     if(s.k==='circ')add('0','CIRCLE','8','CUT','62',String(aci(s.f)),'10',n3(s.x),'20',Y(s.y),'30','0','40',n3(s.r));
     else if(s.k==='poly')poly(s.p,'CUT',true,aci(s.f));
@@ -566,7 +583,7 @@ window.addEventListener('resize',resize);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 if(document.fonts)document.fonts.ready.then(()=>{defaultImage();rebuild();draw();});
 resize();requestAnimationFrame(tick);
-window.__AP={S,PATTERNS,rebuild,toSVG,toDXF,built:()=>built,rdStep,rdParams,RD};
+window.__AP={S,PATTERNS,rebuild,renderScene,buildOutline,roundHole,toSVG,toDXF,built:()=>built,rdStep,rdParams,RD};
 })();
 </script>
 </body>

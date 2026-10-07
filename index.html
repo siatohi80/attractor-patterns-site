@@ -80,7 +80,7 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
   <section style="min-width:0">
     <div class="stage">
       <canvas id="cv" aria-label="Pattern sheet. Drag attractors and outline points to edit."></canvas>
-      <div class="banner" id="banner" hidden>Click to add outline points. Click the first point (or press Enter) to close. Esc cancels.</div>
+      <div class="banner" id="banner" hidden>Click to place points, or press and drag to sketch freehand. Click the first point (or press Enter) to close. Esc cancels.</div>
     </div>
     <div class="info">
       <div class="panel">
@@ -115,11 +115,13 @@ footer{margin-top:28px;color:var(--muted);font-size:.85rem;max-width:80ch}
         <option value="grille" selected>Car grille</option>
         <option value="circle">Circle</option>
         <option value="hex">Hexagon</option>
+        <option value="blob">Organic (smooth)</option>
         <option value="custom" disabled>Custom (drawn)</option>
       </select>
       <div class="btns"><button id="draw" aria-pressed="false">Draw outline</button></div>
       <label for="margin"><span class="row">Edge margin <output id="marginO"></output></span><input id="margin" type="range" min="0" max="40" step="1" value="8"></label>
-      <p class="hint">Drag the small squares to reshape the outline.</p>
+      <label class="check"><input id="smooth" type="checkbox"> Smooth curves through points</label>
+      <p class="hint">Drag the squares to reshape. Double-click a square to switch that point between sharp and smooth (round handles are smooth).</p>
     </fieldset>
 
     <fieldset>
@@ -179,19 +181,35 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t;
 const S={
   pattern:'honey', atts:[{t:'line',a:[110,250],b:[530,110]},{t:'point',a:[470,250]}], sel:-1,
   R:220, fall:'smooth', comb:'max', inv:false, align:false, showField:true, color:false,
-  s:24, b:2, m:2, margin:8, fillet:1, seed:7, outline:null, drawing:null
+  s:24, b:2, m:2, margin:8, fillet:1, seed:7, ctrl:null, outline:null, outlineVer:0, smoothNew:false, drawing:null
 };
 
 // ---------- outline presets ----------
 function presetOutline(k){
   const cx=PW/2, cy=PH/2;
-  if(k==='rect') return [[20,20],[PW-20,20],[PW-20,PH-20],[20,PH-20]];
-  if(k==='circle'){const r=160,o=[];for(let i=0;i<64;i++){const a=i/64*Math.PI*2;o.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}return o;}
-  if(k==='hex'){const r=170,o=[];for(let i=0;i<6;i++){const a=i/6*Math.PI*2;o.push([cx+r*Math.cos(a),cy+r*0.95*Math.sin(a)]);}return o;}
+  if(k==='rect') return sharp([[20,20],[PW-20,20],[PW-20,PH-20],[20,PH-20]]);
+  if(k==='circle'){const r=160,o=[];for(let i=0;i<8;i++){const a=i/8*Math.PI*2;o.push({p:[cx+r*Math.cos(a),cy+r*Math.sin(a)],sm:true});}return o;}
+  if(k==='blob') return [[120,90],[330,50],[560,110],[590,250],[420,320],[200,310],[60,220]].map(p=>({p,sm:true}));
+  if(k==='hex'){const r=170,o=[];for(let i=0;i<6;i++){const a=i/6*Math.PI*2;o.push([cx+r*Math.cos(a),cy+r*0.95*Math.sin(a)]);}return sharp(o);}
   // car grille: wide top, tapered bottom, chamfered corners
-  return [[70,60],[570,60],[610,110],[560,300],[480,330],[160,330],[80,300],[30,110]];
+  return sharp([[70,60],[570,60],[610,110],[560,300],[480,330],[160,330],[80,300],[30,110]]);
 }
-S.outline=presetOutline('grille');
+function sharp(a){return a.map(p=>({p,sm:false}));}
+// Closed Catmull-Rom through control points; a sharp point keeps a corner.
+function buildOutline(){
+  const C=S.ctrl,n=C.length,o=[];
+  if(!C.some(c=>c.sm)){S.outline=C.map(c=>c.p.slice());S.outlineVer++;return;}
+  for(let i=0;i<n;i++){
+    const P1=C[i],P2=C[(i+1)%n],P0=P1.sm?C[(i+n-1)%n]:P1,P3=P2.sm?C[(i+2)%n]:P2;
+    const L=Math.hypot(P2.p[0]-P1.p[0],P2.p[1]-P1.p[1]),N=Math.max(2,Math.min(40,Math.ceil(L/6)));
+    for(let k=0;k<N;k++){const t=k/N,t2=t*t,t3=t2*t;const f=(a,b,c,d)=>0.5*(2*b+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+      o.push([clamp(f(P0.p[0],P1.p[0],P2.p[0],P3.p[0]),0,PW),clamp(f(P0.p[1],P1.p[1],P2.p[1],P3.p[1]),0,PH)]);}
+  }
+  S.outline=o;S.outlineVer++;
+}
+function rdp(pts,tol){if(pts.length<3)return pts;let dm=0,ix=0;const A=pts[0],B=pts[pts.length-1];for(let i=1;i<pts.length-1;i++){const d=segDist(pts[i][0],pts[i][1],A,B);if(d>dm){dm=d;ix=i;}}
+  if(dm<=tol)return[A,B];return rdp(pts.slice(0,ix+1),tol).slice(0,-1).concat(rdp(pts.slice(ix),tol));}
+S.ctrl=presetOutline('grille');
 
 // ---------- geometry helpers ----------
 function area(p){let a=0;for(let i=0,n=p.length;i<n;i++){const q=p[i],r=p[(i+1)%n];a+=q[0]*r[1]-r[0]*q[1];}return a/2;}
@@ -360,9 +378,9 @@ const PMAP=Object.fromEntries(PATTERNS.map(p=>[p.id,p]));
 
 // ---------- reaction-diffusion ----------
 const RD={nx:0,ny:0,g:0,U:null,V:null,F:null,K:null,dirty:true,key:''};
-function rdInit(){const g=Math.max(1,S.s/14);RD.g=g;RD.nx=Math.ceil(PW/g);RD.ny=Math.ceil(PH/g);const N=RD.nx*RD.ny;RD.U=new Float32Array(N).fill(1);RD.V=new Float32Array(N);RD.F=new Float32Array(N);RD.K=new Float32Array(N);RD.M=new Uint8Array(N);
+function rdInit(){const g=Math.max(1,S.s/14);RD.g=g;RD.nx=Math.ceil(PW/g);RD.ny=Math.ceil(PH/g);const N=RD.nx*RD.ny;RD.U=new Float32Array(N).fill(1);RD.V=new Float32Array(N);RD.F=new Float32Array(N);RD.K=new Float32Array(N);RD.M=new Uint8Array(N);RD.mk='';
   const r=mulberry(S.seed);for(let n=0;n<70;n++){const cx=Math.floor(r()*RD.nx),cy=Math.floor(r()*RD.ny);for(let j=-2;j<=2;j++)for(let i=-2;i<=2;i++){const x=cx+i,y=cy+j;if(x>=0&&y>=0&&x<RD.nx&&y<RD.ny){RD.U[y*RD.nx+x]=0.5;RD.V[y*RD.nx+x]=0.25;}}}RD.dirty=true;}
-function rdParams(){for(let j=0;j<RD.ny;j++)for(let i=0;i<RD.nx;i++){const x=(i+.5)*RD.g,y=(j+.5)*RD.g,k=j*RD.nx+i,f=field(x,y).f;RD.F[k]=lerp(0.0367,0.029,f);RD.K[k]=lerp(0.0649,0.057,f);RD.M[k]=fitsPt(x,y,0)?1:0;}RD.dirty=false;}
+function rdParams(){for(let j=0;j<RD.ny;j++)for(let i=0;i<RD.nx;i++){const x=(i+.5)*RD.g,y=(j+.5)*RD.g,k=j*RD.nx+i,f=field(x,y).f;RD.F[k]=lerp(0.0367,0.029,f);RD.K[k]=lerp(0.0649,0.057,f);if(RD.mk!==S.outlineVer+'/'+S.margin)RD.M[k]=fitsPt(x,y,0)?1:0;}RD.mk=S.outlineVer+'/'+S.margin;RD.dirty=false;}
 function rdStep(n){const{nx,ny,U,V,F,K,M}=RD;const U2=new Float32Array(U.length),V2=new Float32Array(V.length);
   for(let it=0;it<n;it++){for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const k=j*nx+i;if(!M[k]){U2[k]=1;V2[k]=0;continue;}let l=i>0?k-1:k,r=i<nx-1?k+1:k,u=j>0?k-nx:k,d=j<ny-1?k+nx:k;if(!M[l])l=k;if(!M[r])r=k;if(!M[u])u=k;if(!M[d])d=k;
       const lu=U[l]+U[r]+U[u]+U[d]-4*U[k],lv=V[l]+V[r]+V[u]+V[d]-4*V[k],uvv=U[k]*V[k]*V[k];U2[k]=U[k]+(0.2*lu-uvv+F[k]*(1-U[k]));V2[k]=V[k]+(0.1*lv+uvv-(F[k]+K[k])*V[k]);}
@@ -422,10 +440,10 @@ function draw(){
   const k=K;renderScene(ctx,k,{metal:css('--metal'),sheet:css('--sheet'),hole:css('--hole'),field:S.showField,fieldColor:css('--field'),outlineColor:css('--outline')});
   const acc=css('--accent');
   // outline vertex handles
-  if(!S.drawing){ctx.fillStyle=css('--surface');ctx.strokeStyle=acc;ctx.lineWidth=1.5;for(const q of S.outline){ctx.fillRect(q[0]*k-4,q[1]*k-4,8,8);ctx.strokeRect(q[0]*k-4,q[1]*k-4,8,8);}}
+  if(!S.drawing){ctx.fillStyle=css('--surface');ctx.strokeStyle=acc;ctx.lineWidth=1.5;for(const c of S.ctrl){const q=c.p;ctx.beginPath();if(c.sm)ctx.arc(q[0]*k,q[1]*k,5,0,7);else ctx.rect(q[0]*k-4,q[1]*k-4,8,8);ctx.fill();ctx.stroke();}}
   // drawing preview
   if(S.drawing){const d=S.drawing;ctx.strokeStyle=acc;ctx.fillStyle=acc;ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.beginPath();d.pts.forEach((q,i)=>ctx[i?'lineTo':'moveTo'](q[0]*k,q[1]*k));if(d.hover&&d.pts.length)ctx.lineTo(d.hover[0]*k,d.hover[1]*k);ctx.stroke();ctx.setLineDash([]);
-    d.pts.forEach((q,i)=>{ctx.beginPath();ctx.arc(q[0]*k,q[1]*k,i?4:7,0,7);ctx.fill();});}
+    d.pts.forEach((q,i)=>{ctx.beginPath();ctx.arc(q[0]*k,q[1]*k,i?(d.sm[i]?3:4):7,0,7);ctx.fill();});}
   // attractors
   S.atts.forEach((A,i)=>{const sel=i===S.sel;ctx.strokeStyle=acc;ctx.fillStyle=acc;ctx.lineWidth=sel?5:3.5;
     if(A.t==='point'){ctx.beginPath();ctx.arc(A.a[0]*k,A.a[1]*k,sel?11:9,0,7);ctx.fill();if(sel){ctx.strokeStyle=css('--surface');ctx.lineWidth=2;ctx.stroke();}}
@@ -450,33 +468,36 @@ let needBuild=false;
 function hit(p){const tol=14*PW/cv.getBoundingClientRect().width;
   for(let i=S.atts.length-1;i>=0;i--){const A=S.atts[i];for(const key of A.t==='point'?['a']:['a','b'])if(Math.hypot(A[key][0]-p[0],A[key][1]-p[1])<tol)return{t:'att',i,key};
     if(A.t==='line'&&segDist(p[0],p[1],A.a,A.b)<tol*0.7)return{t:'att',i,key:'both'};}
-  for(let i=0;i<S.outline.length;i++)if(Math.hypot(S.outline[i][0]-p[0],S.outline[i][1]-p[1])<tol)return{t:'ov',i};
+  for(let i=0;i<S.ctrl.length;i++)if(Math.hypot(S.ctrl[i].p[0]-p[0],S.ctrl[i].p[1]-p[1])<tol)return{t:'ov',i};
   return null;}
 cv.addEventListener('pointerdown',e=>{const p=toMM(e);
-  if(S.drawing){const d=S.drawing;const tol=14*PW/cv.getBoundingClientRect().width;if(d.pts.length>=3&&Math.hypot(d.pts[0][0]-p[0],d.pts[0][1]-p[1])<tol){finishDraw();return;}d.pts.push(p);draw();return;}
+  if(S.drawing){const d=S.drawing;const tol=14*PW/cv.getBoundingClientRect().width;if(d.pts.length>=3&&Math.hypot(d.pts[0][0]-p[0],d.pts[0][1]-p[1])<tol){finishDraw();return;}d.pts.push(p);d.sm.push(S.smoothNew);d.down=true;d.strokeStart=d.pts.length-1;cv.setPointerCapture(e.pointerId);draw();return;}
   const h=hit(p);if(!h){S.sel=-1;draw();return;}
   if(h.t==='att')S.sel=h.i;drag=h;last=p;cv.setPointerCapture(e.pointerId);draw();});
 cv.addEventListener('pointermove',e=>{const p=toMM(e);
-  if(S.drawing){S.drawing.hover=p;draw();return;}
+  if(S.drawing){const d=S.drawing;d.hover=p;if(d.down){const q=d.pts[d.pts.length-1];if(Math.hypot(q[0]-p[0],q[1]-p[1])>2.5){d.pts.push(p);d.sm.push(true);d.free=true;}}draw();return;}
   if(!drag){const h=hit(p);cv.style.cursor=h?'grab':'crosshair';return;}
   const dx=p[0]-last[0],dy=p[1]-last[1];last=p;
-  if(drag.t==='ov'){S.outline[drag.i]=[clamp(p[0],0,PW),clamp(p[1],0,PH)];setShapeSel('custom');}
+  if(drag.t==='ov'){S.ctrl[drag.i].p=[clamp(p[0],0,PW),clamp(p[1],0,PH)];buildOutline();setShapeSel('custom');}
   else{const A=S.atts[drag.i];if(drag.key==='both'){A.a=[A.a[0]+dx,A.a[1]+dy];A.b=[A.b[0]+dx,A.b[1]+dy];}else A[drag.key]=[clamp(p[0],0,PW),clamp(p[1],0,PH)];}
   if(PMAP[S.pattern].raster)RD.dirty=true;schedule(true);});
-['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{drag=null;}));
+['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{drag=null;const d=S.drawing;if(d&&d.down){d.down=false;
+  // simplify the freehand stroke just drawn into a few smooth control points
+  const st=d.strokeStart,stroke=d.pts.slice(st);if(stroke.length>2){const simp=rdp(stroke,2.5);d.pts=d.pts.slice(0,st).concat(simp);d.sm=d.sm.slice(0,st).concat(simp.map((_,i)=>i>0||d.sm[st]));d.sm[st]=d.sm[st]||false;}draw();}}));
 function setShapeSel(v){$('shape').value=v;}
-function startDraw(){S.drawing={pts:[],hover:null};$('draw').setAttribute('aria-pressed','true');$('banner').hidden=false;draw();}
+function startDraw(){S.drawing={pts:[],sm:[],hover:null,down:false,free:false};$('draw').setAttribute('aria-pressed','true');$('banner').hidden=false;draw();}
 function cancelDraw(){S.drawing=null;$('draw').setAttribute('aria-pressed','false');$('banner').hidden=true;draw();}
-function finishDraw(){const d=S.drawing;if(d&&d.pts.length>=3){S.outline=d.pts.map(q=>[clamp(q[0],0,PW),clamp(q[1],0,PH)]);setShapeSel('custom');}cancelDraw();if(RD.U)RD.dirty=true;schedule(true);}
+function finishDraw(){const d=S.drawing;if(d&&d.pts.length>=3){S.ctrl=d.pts.map((q,i)=>({p:[clamp(q[0],0,PW),clamp(q[1],0,PH)],sm:!!d.sm[i]}));buildOutline();setShapeSel('custom');}cancelDraw();if(RD.U)RD.dirty=true;schedule(true);}
 $('draw').onclick=()=>S.drawing?cancelDraw():startDraw();
 window.addEventListener('keydown',e=>{if(S.drawing){if(e.key==='Enter')finishDraw();if(e.key==='Escape')cancelDraw();return;}
   if((e.key==='Delete'||e.key==='Backspace')&&S.sel>=0&&document.activeElement===document.body){removeSel();e.preventDefault();}});
-cv.addEventListener('dblclick',()=>{if(S.drawing)finishDraw();});
+cv.addEventListener('dblclick',e=>{if(S.drawing){finishDraw();return;}const h=hit(toMM(e));if(h&&h.t==='ov'){S.ctrl[h.i].sm=!S.ctrl[h.i].sm;buildOutline();setShapeSel('custom');RD.dirty=true;schedule(true);}});
 function removeSel(){if(S.sel<0)return;S.atts.splice(S.sel,1);S.sel=-1;RD.dirty=true;schedule(true);}
 $('remove').onclick=removeSel;
 $('addPoint').onclick=()=>{S.atts.push({t:'point',a:[PW/2+(Math.random()-.5)*120,PH/2+(Math.random()-.5)*80]});S.sel=S.atts.length-1;RD.dirty=true;schedule(true);};
 $('addLine').onclick=()=>{S.atts.push({t:'line',a:[PW*0.25,PH*0.5],b:[PW*0.75,PH*0.5]});S.sel=S.atts.length-1;RD.dirty=true;schedule(true);};
-$('shape').onchange=e=>{if(e.target.value!=='custom'){S.outline=presetOutline(e.target.value);RD.dirty=true;schedule(true);}};
+$('shape').onchange=e=>{if(e.target.value!=='custom'){S.ctrl=presetOutline(e.target.value);buildOutline();$('smooth').checked=S.smoothNew=S.ctrl.every(c=>c.sm);RD.dirty=true;schedule(true);}};
+$('smooth').addEventListener('change',e=>{S.smoothNew=e.target.checked;for(const c of S.ctrl)c.sm=S.smoothNew;buildOutline();RD.dirty=true;schedule(true);});
 $('reseed').onclick=()=>{S.seed=(S.seed*9301+49297)%233280||1;RD.key='';schedule(true);};
 
 // pattern select with groups
@@ -540,7 +561,7 @@ function tick(){if(PMAP[S.pattern].raster&&!document.hidden){if(!RD.U)rdInit();i
 
 // ---------- boot ----------
 defaultImage();
-showInfo();rebuild();
+buildOutline();showInfo();rebuild();
 window.addEventListener('resize',resize);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 if(document.fonts)document.fonts.ready.then(()=>{defaultImage();rebuild();draw();});

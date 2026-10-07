@@ -22,12 +22,18 @@
   --e1:0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15);
   color-scheme:light;
 }
-@media (prefers-color-scheme: dark){:root{
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --md-primary:#D0BCFF; --md-on-primary:#381E72; --md-primary-container:#4F378B; --md-on-primary-container:#EADDFF;
   --md-secondary-container:#4A4458; --md-on-secondary-container:#E8DEF8; --md-tertiary:#EFB8C8;
   --md-surface:#141218; --md-surface-low:#1D1B20; --md-surface-c:#211F26; --md-surface-high:#2B2930; --md-surface-highest:#36343B;
   --md-on-surface:#E6E0E9; --md-on-surface-variant:#CAC4D0; --md-outline:#938F99; --md-outline-variant:#49454F; --md-error:#F2B8B5;
   --surface:#211F26; --metal:#0F0D13; --accent:#D0BCFF; --field:#EFB8C8; --hole:#0B0A0E; --sheet:#6B6770; --outline:#D0BCFF; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --md-primary:#D0BCFF; --md-on-primary:#381E72; --md-primary-container:#4F378B; --md-on-primary-container:#EADDFF;
+  --md-secondary-container:#4A4458; --md-on-secondary-container:#E8DEF8; --md-tertiary:#EFB8C8;
+  --md-surface:#141218; --md-surface-low:#1D1B20; --md-surface-c:#211F26; --md-surface-high:#2B2930; --md-surface-highest:#36343B;
+  --md-on-surface:#E6E0E9; --md-on-surface-variant:#CAC4D0; --md-outline:#938F99; --md-outline-variant:#49454F; --md-error:#F2B8B5;
+  --surface:#211F26; --metal:#0F0D13; --accent:#D0BCFF; --field:#EFB8C8; --hole:#0B0A0E; --sheet:#6B6770; --outline:#D0BCFF; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0}
@@ -110,6 +116,7 @@ footer a,.panel a{color:var(--md-primary)}
     <h1>Attractor Patterns</h1>
     <p class="lede">Draw an outline, drop point and line attractors, and watch the pattern respond. Sizes are in millimetres; export SVG, DXF or PNG when it looks right.</p>
   </div>
+  <div class="btns" role="group" aria-label="Theme"><button id="thAuto" aria-pressed="true">Auto</button><button id="thLight" aria-pressed="false">Light</button><button id="thDark" aria-pressed="false">Dark</button></div>
 </header>
 
 <main>
@@ -619,12 +626,20 @@ window.addEventListener('resize',resize);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 if(document.fonts)document.fonts.ready.then(()=>{defaultImage();rebuild();draw();});
 resize();requestAnimationFrame(tick);
+// Theme: auto (system), light or dark, remembered on this device
+(function(){const ids={auto:'thAuto',light:'thLight',dark:'thDark'};
+  function apply(t){if(t==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',t);
+    for(const k in ids)document.getElementById(ids[k]).setAttribute('aria-pressed',k===t);try{localStorage.setItem('ap-theme',t);}catch(e){}draw();}
+  let t='auto';try{t=localStorage.getItem('ap-theme')||'auto';}catch(e){}
+  for(const k in ids)document.getElementById(ids[k]).onclick=()=>apply(k);apply(t);})();
 window.__AP={S,PATTERNS,rebuild,renderScene,buildOutline,roundHole,toSVG,toDXF,built:()=>built,rdStep,rdParams,RD};
 })();
 
 // Material slider: filled track up to the thumb
 function fillRange(r){const v=(r.value-r.min)/(r.max-r.min)*100;r.style.setProperty('--p',v+'%');}
 document.querySelectorAll('input[type=range]').forEach(r=>{fillRange(r);r.addEventListener('input',()=>fillRange(r));});
+
+
 </script>
 </body>
 </html>

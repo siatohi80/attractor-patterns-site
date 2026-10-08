@@ -430,6 +430,14 @@ function obround(x,y,L,w,ang){const r=w/2,h=Math.max(L/2-r,0),o=[],c=Math.cos(an
   for(let i=0;i<=10;i++){const a=-Math.PI/2+i*Math.PI/10;o.push([h+r*Math.cos(a),r*Math.sin(a)]);}
   for(let i=0;i<=10;i++){const a=Math.PI/2+i*Math.PI/10;o.push([-h+r*Math.cos(a),r*Math.sin(a)]);}
   return o.map(([u,v])=>[x+u*c-v*s,y+u*s+v*c]);}
+function lens(x,y,L,W,ang){const R=(L*L/4+W*W/4)/W,d=R-W/2,ha=Math.asin(clamp(L/2/R,0,1)),o=[],c=Math.cos(ang),s=Math.sin(ang);
+  for(let i=0;i<=8;i++){const a=-ha+2*ha*i/8;o.push([R*Math.sin(a),R*Math.cos(a)-d]);}
+  for(let i=0;i<=8;i++){const a=ha-2*ha*i/8;o.push([R*Math.sin(a),-(R*Math.cos(a)-d)]);}
+  return o.map(([u,v])=>[x+u*c-v*s,y+u*s+v*c]);}
+function yShape(x,y,L,w){const o=[],ci=(w/2)/Math.sin(Math.PI/3);
+  for(let i=0;i<3;i++){const a=Math.PI/2+i*2*Math.PI/3,nx=-Math.sin(a),ny=Math.cos(a),b=a+Math.PI/3;
+    o.push([x+Math.cos(a)*L-nx*w/2,y+Math.sin(a)*L-ny*w/2],[x+Math.cos(a)*L+nx*w/2,y+Math.sin(a)*L+ny*w/2],[x+Math.cos(b)*ci,y+Math.sin(b)*ci]);}
+  return o;}
 function segDist(px,py,a,b){const bx=b[0]-a[0],by=b[1]-a[1],L2=bx*bx+by*by||1;let t=((px-a[0])*bx+(py-a[1])*by)/L2;t=clamp(t,0,1);return Math.hypot(px-a[0]-t*bx,py-a[1]-t*by);}
 function inPoly(x,y,p){let c=false;for(let i=0,j=p.length-1;i<p.length;j=i++){const a=p[i],b=p[j];if(((a[1]>y)!==(b[1]>y))&&(x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0]))c=!c;}return c;}
 function edgeDist(x,y,p){let d=1e9;for(let i=0,n=p.length;i<n;i++)d=Math.min(d,segDist(x,y,p[i],p[(i+1)%n]));return d;}
@@ -554,6 +562,41 @@ const PATTERNS=[
     for(const p of D.pts){if(2*p.r<S.m){dr++;continue;}o.push({k:'circ',x:p.x,y:p.y,r:p.r,f:field(p.x,p.y).f});}return{shapes:o,dropped:dr};}},
  {id:'halftone',name:'Halftone (image + field)',group:'Image-based',drive:'Dot size from a sample image, multiplied by the attractor field. Upload your own image in step 3.',make:'Dots below the minimum hole size are dropped rather than shrunk further; cap open area so the panel stays stiff.',
   build(){const s=S.s,rmax=(s-S.b)/2,o=[];let dr=0;for(const[x,y]of hexCenters(s)){const{f}=field(x,y),r=rmax*(0.15+0.85*f)*(0.12+0.88*dark(x,y));if(2*r<S.m){dr++;continue;}o.push({k:'circ',x,y,r,f});}return{shapes:o,dropped:dr};}},
+ {id:'strut',name:'Strut lattice (swelling nodes)',group:'Tiling',drive:'Strut width: thin struts and big triangular openings near the attractor; far away the nodes swell into round lobes and the openings close up.',make:'The struts are the solid part; keep their thinnest width at or above the minimum bridge. Large corner rounding keeps the lobes smooth for laser and waterjet.',
+  build(){const s=S.s,h=s*Math.sqrt(3)/2,B=outlineBox(),o=[];let dr=0;
+    for(let r=0,y=B.y0-h;y<=B.y1+h;y+=h,r++)for(let x=B.x0-s+(r%2?s/2:0);x<=B.x1+s;x+=s)for(const up of[0,1]){
+      const t=up?[[x,y],[x+s,y],[x+s/2,y+h]]:[[x+s,y],[x+s/2,y+h],[x+s*1.5,y+h]],c=centroid(t),f=field(c[0],c[1]).f;
+      const w=lerp(s*0.42,S.b,f),p=inset(t,w/2);if(p.length<3){continue;}if(inDia(p)<S.m){dr++;continue;}
+      o.push({k:'poly',p:fillet(p,lerp(s*0.2,s*0.04,f)),f,noRound:true});}
+    return{shapes:o,dropped:dr};}},
+ {id:'ytiles',name:'Y tiles',group:'Tiling',drive:'Arm length and width: Y shapes grow and thicken near the attractor.',make:'Inner corners of the Y are sharp; the corner radius softens them. Arm tips keep the minimum bridge to the next row.',
+  build(){const s=S.s,h=s*Math.sqrt(3)/2,o=[];let dr=0;
+    for(const[x,y]of hexCenters(s,h)){const f=field(x,y).f;if(f<=0.02)continue;const L=(s/Math.sqrt(3)-S.b)*(0.35+0.65*f),w=Math.max(S.m,lerp(s*0.08,s*0.2,f));
+      if(L<S.m){dr++;continue;}o.push({k:'poly',p:yShape(x,y,L,w),f});}
+    return{shapes:o,dropped:dr};}},
+ {id:'nesthex',name:'Nested hexagons',group:'Tiling',drive:'Ring width: hexagon rings open up near the attractor (a second, inner ring appears) and thin to hairlines far away.',make:'Each ring is cut as six segments with a bridge at every corner, so the centre stays attached. Use as grooves if you want closed rings.',
+  build(){const s=S.s,o=[];let dr=0;for(const[x,y]of hexCenters(s)){const f=field(x,y).f,Ro=(s-S.b)/Math.sqrt(3),w=lerp(0,Ro*0.26,f);if(w<=0.05)continue;if(w<S.m){dr++;continue;}
+      const ring=(Ro,w)=>{const Ri=Ro-w*2/Math.sqrt(3),gap=S.b/2;for(let i=0;i<6;i++){const a0=Math.PI/6+i*Math.PI/3,a1=a0+Math.PI/3,P=(r,a)=>[x+r*Math.cos(a),y+r*Math.sin(a)];
+        const o0=P(Ro,a0),o1=P(Ro,a1),i0=P(Ri,a0),i1=P(Ri,a1),sh=(p,q,d)=>{const L=Math.hypot(q[0]-p[0],q[1]-p[1]);return[p[0]+(q[0]-p[0])/L*d,p[1]+(q[1]-p[1])/L*d];};
+        o.push({k:'poly',p:[sh(o0,o1,gap),sh(o1,o0,gap),sh(i1,i0,gap),sh(i0,i1,gap)],f});}return Ri;};
+      const Ri=ring(Ro,w),R2=Ri-Math.max(S.b,w*0.9)*2/Math.sqrt(3),w2=w*0.8;if(w2>=S.m&&R2-w2*2/Math.sqrt(3)>S.b)ring(R2,w2);}
+    return{shapes:o,dropped:dr,grouped:6};}},
+ {id:'sunflower',name:'Sunflower (Fibonacci)',group:'Spiral',drive:'Dot size along a golden-angle spiral centred on the outline: dots grow near the attractor.',make:'Spacing is even across the spiral, so the bridge only depends on the largest dot; dots below the minimum hole are removed.',
+  build(){const c=S.s*0.62,ga=Math.PI*(3-Math.sqrt(5)),[cx,cy]=centroid(S.outline),B=outlineBox(),Rmax=Math.hypot(B.x1-B.x0,B.y1-B.y0)/2,n=Math.ceil((Rmax/c)**2),rmax=(c*1.75-S.b)/2,o=[];let dr=0;
+    for(let k=1;k<=n;k++){const r=c*Math.sqrt(k),a=k*ga,x=cx+r*Math.cos(a),y=cy+r*Math.sin(a);if(!inside(x,y))continue;const f=field(x,y).f,rr=rmax*f;if(rr<=0.05)continue;if(2*rr<S.m){dr++;continue;}o.push({k:'circ',x,y,r:rr,f});}
+    return{shapes:o,dropped:dr};}},
+ {id:'herring',name:'Herringbone slots',group:'Linear',drive:'Slot length and width: rows lean alternately left and right, and slots grow near the attractor.',make:'Rounded slot ends cut cleanly. Length is capped so slots in neighbouring rows keep the minimum bridge.',
+  build(){const s=S.s,o=[];let dr=0,row=0;const B=outlineBox();for(let y=B.y0+s/4;y<=B.y1;y+=s/2,row++)for(let x=B.x0+s/2;x<=B.x1;x+=s/1.6){const f=field(x,y).f,ang=(row%2?1:-1)*Math.PI/4,L=lerp(s*0.25,s*0.62,f),w=Math.max(S.m,lerp(s*0.12,s*0.2,f));if(f<=0.02)continue;if(L<S.m){dr++;continue;}o.push({k:'poly',p:obround(x,y,L,w,ang),f,noRound:true});}
+    return{shapes:o,dropped:dr};}},
+ {id:'pinwheel',name:'Pinwheel lens slits',group:'Linear',drive:'Twist and size: lens slits on a triangle grid turn into pinwheels and grow near the attractor.',make:'Lens tips are sharp; the corner radius rounds them. Slits are capped so tips keep the minimum bridge when twisted.',
+  build(){const s=S.s,h=s*Math.sqrt(3)/2,o=[];let dr=0;for(const[x,y]of hexCenters(s,h))for(const a of[0,Math.PI/3,2*Math.PI/3]){
+      const mx=x+Math.cos(a)*s/2,my=y+Math.sin(a)*s/2,f=field(mx,my).f;if(f<=0.02)continue;const L=lerp(s*0.3,s*0.62,f),W=Math.max(S.m,lerp(s*0.06,s*0.16,f));if(L<S.m){dr++;continue;}
+      o.push({k:'poly',p:lens(mx,my,L,W,a+Math.PI/2+f*Math.PI/4),f});}
+    return{shapes:o,dropped:dr};}},
+ {id:'xdiamond',name:'Cross-slot diamonds',group:'Linear',drive:'Slot length: slots at ±45° grow near the attractor until they meet as diamond outlines.',make:'Slot ends are rounded. The cap on length keeps a bridge where four slots meet at a diamond corner.',
+  build(){const s=S.s*0.75,o=[];let dr=0;const B=outlineBox();let j=0;for(let y=B.y0+s/2;y<=B.y1;y+=s,j++){let i=0;for(let x=B.x0+s/2;x<=B.x1;x+=s,i++){const f=field(x,y).f;if(f<=0.02)continue;
+      const L=lerp(s*0.3,s*Math.SQRT2-S.b*1.6-Math.max(S.m,s*0.14),f),w=Math.max(S.m,s*0.14);if(L<S.m){dr++;continue;}o.push({k:'poly',p:obround(x,y,L+w,w,((i+j)%2?1:-1)*Math.PI/4),f,noRound:true});}}
+    return{shapes:o,dropped:dr};}},
  {id:'rd',name:'Reaction-diffusion',group:'Simulation',drive:'Feed and kill rates: spots far away turn into stripes and mazes near the attractor. Runs live.',make:'Best for 3D printing, CNC relief or engraving. Exports trace the pattern outline; features smaller than your tool or nozzle need filtering.',
   raster:true, build(){return{shapes:rdOutline(),dropped:0,grouped:-1};}}
 ];

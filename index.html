@@ -143,7 +143,8 @@ kbd{min-width:24px;height:22px;padding:0 6px;display:grid;place-items:center;bor
 .att-pick{all:unset;cursor:pointer;flex:1;display:flex;align-items:center;gap:12px;min-width:0;align-self:stretch}
 .att-pick .ms{color:var(--primary)}
 .att-pick small{font-size:12px;color:var(--on-sv);margin-left:auto}
-.att .icon-btn:hover{background:rgba(186,26,26,.08);color:var(--err)}
+.att [data-del]:hover{background:rgba(186,26,26,.08);color:var(--err)}
+.att [data-curve]{margin-right:-8px}.att [data-curve][aria-pressed=true]{color:var(--primary)}
 .sel{height:48px;padding:0 12px;border:1px solid var(--outline);border-radius:8px;background:var(--bg);font:inherit;font-size:14px;color:var(--on-surface);width:100%}
 .sel option{background:var(--sc);color:var(--on-surface)}
 .lbl{display:flex;flex-direction:column;gap:4px}
@@ -358,7 +359,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t;
 
 // ---------- state ----------
 const S={
-  pattern:'honey', atts:[{t:'line',a:[110,250],b:[530,110]},{t:'point',a:[470,250]}], sel:-1,
+  pattern:'honey', atts:[{t:'line',pts:[{p:[110,250],sm:false},{p:[530,110],sm:false}]},{t:'point',a:[470,250]}], sel:-1,
   R:220, fall:'smooth', comb:'max', inv:false, align:false, showField:true, color:false,
   s:24, b:2, m:2, margin:8, fillet:1, seed:7, ctrl:null, outline:null, holes:[], selHole:-1, outlineVer:0, smoothNew:false, drawing:null
 };
@@ -457,11 +458,26 @@ function fallOf(d){
     default: return 1-u*u*(3-2*u);
   }
 }
+// A line attractor is an open polyline {t:'line',pts:[{p,sm}]}; smooth points bend it into a curve through them.
+function openCurve(C){
+  const n=C.length;if(!C.some(c=>c.sm))return C.map(c=>c.p);const o=[];
+  for(let i=0;i<n-1;i++){
+    const P1=C[i],P2=C[i+1],P0=P1.sm&&i>0?C[i-1]:P1,P3=P2.sm&&i+2<n?C[i+2]:P2;
+    const L=Math.hypot(P2.p[0]-P1.p[0],P2.p[1]-P1.p[1]),N=Math.max(2,Math.min(40,Math.ceil(L/6)));
+    for(let k=0;k<N;k++){const t=k/N,t2=t*t,t3=t2*t;const f=(a,b,c,d)=>0.5*(2*b+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+      o.push([f(P0.p[0],P1.p[0],P2.p[0],P3.p[0]),f(P0.p[1],P1.p[1],P2.p[1],P3.p[1])]);}
+  }
+  o.push(C[n-1].p);return o;
+}
+const LCACHE=new WeakMap();
+function linePts(A){const key=JSON.stringify(A.pts),c=LCACHE.get(A);if(c&&c.key===key)return c.p;const p=openCurve(A.pts);LCACHE.set(A,{key,p});return p;}
+function lineLen(A){const p=linePts(A);let L=0;for(let i=1;i<p.length;i++)L+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]);return L;}
 function attInfo(A,x,y){
   if(A.t==='point'){const dx=x-A.a[0],dy=y-A.a[1],d=Math.hypot(dx,dy)||1e-9;return{d,nx:dx/d,ny:dy/d,tx:-dy/d,ty:dx/d};}
-  const ax=A.a[0],ay=A.a[1],bx=A.b[0]-ax,by=A.b[1]-ay,L2=bx*bx+by*by||1,L=Math.sqrt(L2);
-  const t=clamp(((x-ax)*bx+(y-ay)*by)/L2,0,1),dx=x-ax-t*bx,dy=y-ay-t*by,d=Math.hypot(dx,dy)||1e-9;
-  return{d,nx:dx/d,ny:dy/d,tx:bx/L,ty:by/L};
+  const P=linePts(A);let b=null;
+  for(let i=1;i<P.length;i++){const ax=P[i-1][0],ay=P[i-1][1],bx=P[i][0]-ax,by=P[i][1]-ay,L2=bx*bx+by*by||1e-12;
+    const t=clamp(((x-ax)*bx+(y-ay)*by)/L2,0,1),dx=x-ax-t*bx,dy=y-ay-t*by,d2=dx*dx+dy*dy;if(!b||d2<b.d2)b={d2,dx,dy,bx,by,L:Math.sqrt(L2)||1};}
+  const d=Math.sqrt(b.d2)||1e-9;return{d,nx:b.dx/d,ny:b.dy/d,tx:b.bx/b.L,ty:b.by/b.L};
 }
 function field(x,y){
   let f=0,best=-1,bi=null;
@@ -702,7 +718,7 @@ function toDXF(){
 }
 function toPNG(cb){const k=6,c=document.createElement('canvas');c.width=PW*k;c.height=PH*k;renderScene(c.getContext('2d'),k,{metal:'#ffffff',sheet:'#d0d4d9',hole:'#111111',field:false,outlineColor:'#d9661f'});c.toBlob(cb,'image/png');}
 // ---------- UI state ----------
-Object.assign(S,{tool:'select',shape:'grille',selVerts:[],selPts:[],pending:null,marq:null,hover:null,adv:false});
+Object.assign(S,{selAP:-1,tool:'select',shape:'grille',selVerts:[],selPts:[],pending:null,marq:null,hover:null,adv:false});
 const SHAPES=[['rect','Rectangle'],['grille','Car grille'],['circle','Circle'],['hex','Hexagon'],['blob','Organic'],['custom','Custom']];
 const RANDOM=new Set(['voronoi','delaunay','truchet','packing','rd']);
 const HOLE_R=20;
@@ -743,9 +759,12 @@ function draw(){
   // attractors
   S.atts.forEach((A,i)=>{const on=i===S.sel;
     if(A.t==='point'){if(on){ctx.beginPath();ctx.arc(A.a[0]*k,A.a[1]*k,px(13),0,7);ctx.strokeStyle=P;ctx.lineWidth=px(2);ctx.stroke();}dot(A.a,7);}
-    else{ctx.lineCap='round';ctx.beginPath();ctx.moveTo(A.a[0]*k,A.a[1]*k);ctx.lineTo(A.b[0]*k,A.b[1]*k);ctx.strokeStyle=sheet;ctx.lineWidth=px(7);ctx.stroke();ctx.strokeStyle=P;ctx.lineWidth=px(3);ctx.stroke();dot(A.a,on?7:5);dot(A.b,on?7:5);}});
-  if(S.pending){ctx.beginPath();ctx.arc(S.pending[0]*k,S.pending[1]*k,px(6),0,7);ctx.fillStyle=P;ctx.fill();
-    if(S.hover){ctx.setLineDash([px(4),px(4)]);ctx.beginPath();ctx.moveTo(S.pending[0]*k,S.pending[1]*k);ctx.lineTo(S.hover[0]*k,S.hover[1]*k);ctx.strokeStyle=P;ctx.lineWidth=px(2);ctx.stroke();ctx.setLineDash([]);}}
+    else{ctx.lineCap='round';ctx.lineJoin='round';const pp=linePts(A);ctx.beginPath();pp.forEach((q,j)=>ctx[j?'lineTo':'moveTo'](q[0]*k,q[1]*k));ctx.strokeStyle=sheet;ctx.lineWidth=px(7);ctx.stroke();ctx.strokeStyle=P;ctx.lineWidth=px(3);ctx.stroke();
+      const n=A.pts.length;A.pts.forEach((c,j)=>{const end=j===0||j===n-1;if(end){dot(c.p,on?7:5);}else if(on){const r=4.5;rrect(c.p[0]*k-px(r),c.p[1]*k-px(r),px(2*r),px(2*r),c.sm?px(r):px(1.5),sheet,P,px(2));}
+        if(on&&j===S.selAP){ctx.beginPath();ctx.arc(c.p[0]*k,c.p[1]*k,px(12),0,7);ctx.strokeStyle=P;ctx.lineWidth=px(2);ctx.stroke();}});}});
+  if(S.pending&&S.pending.length){const d=S.pending;ctx.strokeStyle=P;ctx.fillStyle=P;ctx.lineWidth=px(3);ctx.beginPath();d.forEach((q,i)=>ctx[i?'lineTo':'moveTo'](q[0]*k,q[1]*k));ctx.stroke();
+    if(S.hover){ctx.setLineDash([px(4),px(4)]);ctx.beginPath();ctx.moveTo(d[d.length-1][0]*k,d[d.length-1][1]*k);ctx.lineTo(S.hover[0]*k,S.hover[1]*k);ctx.lineWidth=px(2);ctx.stroke();ctx.setLineDash([]);}
+    d.forEach(q=>{ctx.beginPath();ctx.arc(q[0]*k,q[1]*k,px(5),0,7);ctx.fill();});}
   function dot(q,r){ctx.beginPath();ctx.arc(q[0]*k,q[1]*k,px(r),0,7);ctx.fillStyle=P;ctx.fill();ctx.strokeStyle=sheet;ctx.lineWidth=px(2.5);ctx.stroke();}
   updateStats();
 }
@@ -786,26 +805,32 @@ function shapeButtons(){
 function attList(){
   const box=$('attList');box.innerHTML='';
   S.atts.forEach((A,i)=>{const row=document.createElement('div');row.className='att';row.setAttribute('aria-current',i===S.sel);
-    const pos=A.t==='point'?`${Math.round(A.a[0])}, ${Math.round(A.a[1])} mm`:`${Math.round(Math.hypot(A.b[0]-A.a[0],A.b[1]-A.a[1]))} mm long`;
-    row.innerHTML=`<button class="att-pick"><span class="ms s20">${A.t==='point'?'adjust':'timeline'}</span><span>${A.t==='point'?'Point':'Line'} ${i+1}</span><small>${pos}</small></button><button class="icon-btn" title="Remove" aria-label="Remove ${A.t} ${i+1}"><span class="ms s20">close</span></button>`;
-    row.firstChild.onclick=()=>{S.sel=i;clearShapeSel();refresh();};row.lastChild.onclick=()=>{S.atts.splice(i,1);if(S.sel===i)S.sel=-1;else if(S.sel>i)S.sel--;changed(false,true);};box.appendChild(row);});
+    const curved=A.t==='line'&&A.pts.some(c=>c.sm),pos=A.t==='point'?`${Math.round(A.a[0])}, ${Math.round(A.a[1])} mm`:`${A.pts.length} pts · ${Math.round(lineLen(A))} mm`;
+    row.innerHTML=`<button class="att-pick"><span class="ms s20">${A.t==='point'?'adjust':curved?'line_curve':'timeline'}</span><span>${A.t==='point'?'Point':curved?'Curve':'Polyline'} ${i+1}</span><small>${pos}</small></button>`+
+      (A.t==='line'?`<button class="icon-btn" data-curve title="${curved?'Make straight segments':'Make it a smooth curve'}" aria-label="${curved?'Make line '+(i+1)+' straight':'Make line '+(i+1)+' curved'}" aria-pressed="${curved}"><span class="ms s20">${curved?'timeline':'line_curve'}</span></button>`:'')+
+      `<button class="icon-btn" data-del title="Remove" aria-label="Remove ${A.t} ${i+1}"><span class="ms s20">close</span></button>`;
+    row.firstChild.onclick=()=>{S.sel=i;S.selAP=-1;clearShapeSel();refresh();};
+    row.querySelector('[data-del]').onclick=()=>{S.atts.splice(i,1);if(S.sel===i){S.sel=-1;S.selAP=-1;}else if(S.sel>i)S.sel--;changed(false,true);};
+    const cb=row.querySelector('[data-curve]');if(cb)cb.onclick=()=>{const to=!curved;A.pts.forEach((c,j)=>c.sm=to&&j>0&&j<A.pts.length-1);if(to&&A.pts.length===2)bendLine(A);S.sel=i;changed(false);};
+    box.appendChild(row);});
 }
 
 // ---------- tools and hints ----------
-function setTool(t){S.tool=t;S.pending=null;S.marq=null;if(S.drawing)S.drawing=null;
+function setTool(t){finishLine(true);S.tool=t;S.pending=t==='line'?[]:null;S.marq=null;if(S.drawing)S.drawing=null;
   if(t==='outline'||t==='drawhole')S.drawing={pts:[],sm:[],hover:null,down:false,target:t==='drawhole'?'hole':'outline'};refresh();}
 const K_=(k,l)=>`<span class="key"><kbd>${k}</kbd>${l}</span>`;
 function hint(){
   const sh=S.holes[S.selHole];let h;
   if(S.tool==='select'){
     if(sh)h=['radio_button_unchecked','Hole selected',S.selPts.length?`${S.selPts.length} point${S.selPts.length>1?'s':''} selected. Drag to move them together; double-click to make them smooth or sharp.`:'Drag inside to move it, the corner square to resize, or a point to reshape. Shift-click or drag a box to select several points.',[['Shift','add points'],['Ctrl A','all points'],['Del','remove']]];
+    else if(S.sel>=0&&S.atts[S.sel].t==='line')h=[S.atts[S.sel].pts.some(c=>c.sm)?'line_curve':'timeline',S.selAP>=0?'Line point selected':'Line selected',S.selAP>=0?'Drag to move it. Press S to make it smooth (curved) or sharp. Del removes the point.':'Drag a point to reshape, or the line to move it. Double-click the line to add a point, or a point to make it smooth or sharp.',[['S','smooth / sharp'],['Del','remove']]];
     else if(S.selVerts.length)h=['polyline',S.selVerts.length>1?`${S.selVerts.length} corners selected`:'Corner selected','Drag to move them together. Shift-click or drag a box on empty canvas to select more.',[['S','smooth / sharp'],['Ctrl A','all corners'],['Del','remove']]];
     else h=['arrow_selector_tool','Select','Drag attractors, holes or outline corners. Drag a box on empty canvas to select several corners. Double-click an edge to add one.',[['Del','remove'],['R','reshuffle']]];
   }
   else if(S.tool==='outline')h=['draw','Draw outline',S.drawing&&S.drawing.pts.length?'Click to add corners, or drag to sketch. Click the first corner to close.':'Click to place the first corner, or press and drag to sketch freehand.',[['Enter','close'],['Esc','cancel']]];
   else if(S.tool==='drawhole')h=['gesture','Draw hole',S.drawing&&S.drawing.pts.length?'Click to add points, or drag to sketch. Click the first point to close.':'Click or drag inside the outline to draw a hole.',[['Enter','close'],['Esc','cancel']]];
   else if(S.tool==='point')h=['adjust','Point attractor','Click inside the outline to place it.',[['Esc','cancel']]];
-  else if(S.tool==='line')h=['timeline','Line attractor',S.pending?'Click to set the end point.':'Click to set the start point.',[['Esc','cancel']]];
+  else if(S.tool==='line')h=['timeline','Line attractor',S.pending&&S.pending.length?'Click to add more points. Double-click, press Enter or click the last point to finish. Make it curved afterwards with S or the list button.':'Click to set the start point.',[['Enter','finish'],['Esc','cancel']]];
   else h=['add_circle','Round hole',`Click inside the outline to cut a Ø ${2*HOLE_R} mm hole. Resize it afterwards.`,[['Esc','cancel']]];
   $('hintIcon').textContent=h[0];$('hintTitle').textContent=h[1];$('hintText').textContent=h[2];$('hintKeys').innerHTML=h[3].map(([k,l])=>K_(k,l)).join('');
 }
@@ -821,8 +846,12 @@ function refresh(){
   $('chipColor').setAttribute('aria-pressed',S.color);$('chipColor').querySelector('.ms').hidden=!S.color;
   hint();summaries();draw();
 }
-function smoothTarget(){const sh=S.holes[S.selHole];if(sh&&S.selPts.length)return S.selPts.map(i=>sh.ctrl[i]);if(S.selVerts.length)return S.selVerts.map(i=>S.ctrl[i]);return null;}
-function toggleSmooth(){const t=smoothTarget();if(!t)return;const to=!t[0].sm;for(const c of t)c.sm=to;if(S.selVerts.length)S.shape='custom';changed(true);}
+function smoothTarget(){const A=S.atts[S.sel];if(A&&A.t==='line'){if(S.selAP>=0)return[A.pts[S.selAP]];const mid=A.pts.slice(1,-1);return mid.length?mid:null;}const sh=S.holes[S.selHole];if(sh&&S.selPts.length)return S.selPts.map(i=>sh.ctrl[i]);if(S.selVerts.length)return S.selVerts.map(i=>S.ctrl[i]);return null;}
+function toggleSmooth(){const A=S.atts[S.sel];if(A&&A.t==='line'&&A.pts.length===2&&S.selAP<0){bendLine(A);changed(false);return;}
+  const t=smoothTarget();if(!t)return;const to=!t[0].sm;for(const c of t)c.sm=to;if(S.selVerts.length)S.shape='custom';changed(!(A&&A.t==='line'));}
+// a two-point line gets a smooth middle point, nudged sideways so the curve is visible
+function bendLine(A){const[a,b]=[A.pts[0].p,A.pts[1].p],dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy)||1,o=Math.min(60,L*0.2);
+  A.pts.splice(1,0,{p:[clamp((a[0]+b[0])/2-dy/L*o,0,PW),clamp((a[1]+b[1])/2+dx/L*o,0,PH)],sm:true});}
 function clearShapeSel(){S.selVerts=[];S.selPts=[];S.selHole=-1;}
 // after a geometry change: rebuild outline (geo) and the pattern
 function changed(geo,quiet){if(geo)buildOutline();if(RD.U)RD.dirty=true;schedule(true);if(!quiet||true)refresh();}
@@ -839,7 +868,9 @@ cv.addEventListener('pointerdown',e=>{
   if(S.drawing){const d=S.drawing;if(d.pts.length>=3&&Math.hypot(d.pts[0][0]-p[0],d.pts[0][1]-p[1])<tolMM(12)){finishDraw();return;}
     d.pts.push(p);d.sm.push(false);d.down=true;d.strokeStart=d.pts.length-1;cv.setPointerCapture(e.pointerId);hint();draw();return;}
   if(t==='point'){if(!inside(p[0],p[1]))return;S.atts.push({t:'point',a:p});S.sel=S.atts.length-1;clearShapeSel();S.tool='select';changed(false);return;}
-  if(t==='line'){if(!S.pending){S.pending=p;refresh();return;}S.atts.push({t:'line',a:S.pending,b:p});S.sel=S.atts.length-1;clearShapeSel();S.pending=null;S.tool='select';changed(false);return;}
+  if(t==='line'){const d=S.pending||(S.pending=[]);const last=d[d.length-1];
+    if(last&&Math.hypot(last[0]-p[0],last[1]-p[1])<tolMM(10)){finishLine();return;}
+    d.push([clamp(p[0],0,PW),clamp(p[1],0,PH)]);refresh();return;}
   if(t==='hole'){if(!inside(p[0],p[1])||edgeDist(p[0],p[1],S.outline)<HOLE_R+2)return;S.holes.push(roundHole(p[0],p[1],HOLE_R));S.selHole=S.holes.length-1;S.selPts=[];S.sel=-1;S.selVerts=[];S.tool='select';changed(true);return;}
   cv.setPointerCapture(e.pointerId);
   const sh=S.holes[S.selHole];
@@ -849,18 +880,18 @@ cv.addEventListener('pointerdown',e=>{
       if(!S.selPts.includes(pi))S.selPts=[pi];drag={t:'hpts',last:p};refresh();return;}}
   for(let i=S.atts.length-1;i>=0;i--){const A=S.atts[i];let part=null;
     if(A.t==='point'){if(Math.hypot(p[0]-A.a[0],p[1]-A.a[1])<tolMM(14))part='a';}
-    else if(Math.hypot(p[0]-A.a[0],p[1]-A.a[1])<tolMM(12))part='a';else if(Math.hypot(p[0]-A.b[0],p[1]-A.b[1])<tolMM(12))part='b';else if(segDist(p[0],p[1],A.a,A.b)<tolMM(9))part='both';
-    if(part){S.sel=i;clearShapeSel();drag={t:'att',i,part,last:p};refresh();return;}}
+    else{const vi=A.pts.findIndex(c=>Math.hypot(p[0]-c.p[0],p[1]-c.p[1])<tolMM(11));if(vi>=0)part=vi;else if(lineHit(A,p)<tolMM(9))part='both';}
+    if(part!==null){S.sel=i;S.selAP=typeof part==='number'?part:-1;clearShapeSel();drag={t:'att',i,part,last:p};refresh();return;}}
   const vi=S.ctrl.findIndex(c=>Math.hypot(p[0]-c.p[0],p[1]-c.p[1])<tolMM(10));
-  if(vi>=0){S.sel=-1;S.selHole=-1;S.selPts=[];if(add){S.selVerts=S.selVerts.includes(vi)?S.selVerts.filter(i=>i!==vi):[...S.selVerts,vi];refresh();return;}
+  if(vi>=0){S.sel=-1;S.selAP=-1;S.selHole=-1;S.selPts=[];if(add){S.selVerts=S.selVerts.includes(vi)?S.selVerts.filter(i=>i!==vi):[...S.selVerts,vi];refresh();return;}
     if(!S.selVerts.includes(vi))S.selVerts=[vi];drag={t:'verts',last:p};refresh();return;}
   for(let h=S.holes.length-1;h>=0;h--)if(inPoly(p[0],p[1],S.holes[h].poly)){if(S.selHole!==h)S.selPts=[];S.selHole=h;S.sel=-1;S.selVerts=[];drag={t:'hole',last:p};refresh();return;}
-  S.sel=-1;S.marq={a:p,b:p,target:S.selHole>=0?'hole':'outline',add};drag={t:'marq'};refresh();
+  S.sel=-1;S.selAP=-1;S.marq={a:p,b:p,target:S.selHole>=0?'hole':'outline',add};drag={t:'marq'};refresh();
 });
 cv.addEventListener('pointermove',e=>{
   const p=toMM(e);
   if(S.drawing){const d=S.drawing;d.hover=p;if(d.down){const q=d.pts[d.pts.length-1];if(Math.hypot(q[0]-p[0],q[1]-p[1])>2.5){d.pts.push(p);d.sm.push(true);}}draw();return;}
-  if(S.tool==='line'&&S.pending){S.hover=p;draw();return;}
+  if(S.tool==='line'&&S.pending&&S.pending.length){S.hover=p;draw();return;}
   if(!drag)return;
   const mv=c=>{c.p=[clamp(c.p[0]+dx,0,PW),clamp(c.p[1]+dy,0,PH)];};let dx=0,dy=0;if(drag.last){dx=p[0]-drag.last[0];dy=p[1]-drag.last[1];drag.last=p;}
   const sh=S.holes[S.selHole];
@@ -869,7 +900,8 @@ cv.addEventListener('pointermove',e=>{
   else if(drag.t==='hpts'&&sh){const old=sh.ctrl.map(c=>c.p.slice());for(const i of S.selPts)mv(sh.ctrl[i]);if(!holeFits(sh.ctrl))sh.ctrl.forEach((c,i)=>c.p=old[i]);buildOutline();}
   else if(drag.t==='hole'&&sh){const old=sh.ctrl.map(c=>c.p.slice());sh.ctrl.forEach(mv);if(!holeFits(sh.ctrl))sh.ctrl.forEach((c,i)=>c.p=old[i]);buildOutline();}
   else if(drag.t==='holeR'&&sh){const kk=Math.max(0.1,Math.hypot(p[0]-drag.c[0],p[1]-drag.c[1])/drag.R0),np=drag.c0.map(q=>({p:[drag.c[0]+(q.p[0]-drag.c[0])*kk,drag.c[1]+(q.p[1]-drag.c[1])*kk],sm:q.sm}));if(holeFits(np)){sh.ctrl=np;buildOutline();}}
-  else if(drag.t==='att'){const A=S.atts[drag.i];if(drag.part==='both'){A.a=[A.a[0]+dx,A.a[1]+dy];A.b=[A.b[0]+dx,A.b[1]+dy];}else A[drag.part]=[clamp(p[0],0,PW),clamp(p[1],0,PH)];}
+  else if(drag.t==='att'){const A=S.atts[drag.i],q=[clamp(p[0],0,PW),clamp(p[1],0,PH)];
+    if(A.t==='point')A.a=q;else if(drag.part==='both')A.pts.forEach(c=>c.p=[c.p[0]+dx,c.p[1]+dy]);else A.pts[drag.part].p=q;}
   if(RD.U)RD.dirty=true;schedule(true);
 });
 function endPointer(){
@@ -885,8 +917,12 @@ function endPointer(){
 }
 cv.addEventListener('pointerup',endPointer);cv.addEventListener('pointercancel',endPointer);
 cv.addEventListener('dblclick',e=>{
-  if(S.drawing){finishDraw();return;}if(S.tool!=='select')return;
+  if(S.drawing){finishDraw();return;}if(S.tool==='line'){finishLine();return;}if(S.tool!=='select')return;
   const p=toMM(e),sh=S.holes[S.selHole];
+  for(let i=S.atts.length-1;i>=0;i--){const A=S.atts[i];if(A.t!=='line')continue;
+    const vi=A.pts.findIndex(c=>Math.hypot(p[0]-c.p[0],p[1]-c.p[1])<tolMM(11));
+    if(vi>0&&vi<A.pts.length-1){S.sel=i;S.selAP=vi;A.pts[vi].sm=!A.pts[vi].sm;changed(false);return;}
+    if(vi<0&&lineHit(A,p)<tolMM(9)){const at=insertIndex(A,p);A.pts.splice(at,0,{p:[clamp(p[0],0,PW),clamp(p[1],0,PH)],sm:A.pts[at-1].sm||!!(A.pts[at]&&A.pts[at].sm)});S.sel=i;S.selAP=at;changed(false);return;}}
   if(sh){const pi=sh.ctrl.findIndex(q=>Math.hypot(p[0]-q.p[0],p[1]-q.p[1])<tolMM(8));if(pi>=0){if(!S.selPts.includes(pi))S.selPts=[pi];toggleSmooth();return;}}
   const vi=S.ctrl.findIndex(c=>Math.hypot(p[0]-c.p[0],p[1]-c.p[1])<tolMM(10));
   if(vi>=0){if(!S.selVerts.includes(vi))S.selVerts=[vi];toggleSmooth();return;}
@@ -897,12 +933,21 @@ function finishDraw(){const d=S.drawing;
     if(d.target==='hole'){S.holes.push({ctrl:C,poly:null});S.selHole=S.holes.length-1;S.selPts=[];S.sel=-1;}else{S.ctrl=C;S.shape='custom';S.selVerts=[];}
     S.drawing=null;S.tool='select';changed(true);return;}
   S.drawing=null;S.tool='select';refresh();}
+function lineHit(A,p){const P=linePts(A);let m=1e18;for(let i=1;i<P.length;i++)m=Math.min(m,segDist(p[0],p[1],P[i-1],P[i]));return m;}
+// where a new point clicked on the line goes: after the control point whose stretch of curve is closest
+function insertIndex(A,p){let best=1,bd=1e18;for(let i=1;i<A.pts.length;i++){const C=openCurve(A.pts.slice(Math.max(0,i-2),Math.min(A.pts.length,i+2))),d=(()=>{let m=1e18;for(let j=1;j<C.length;j++)m=Math.min(m,segDist(p[0],p[1],C[j-1],C[j]));return m;})()+segDist(p[0],p[1],A.pts[i-1].p,A.pts[i].p)*0.01;if(d<bd){bd=d;best=i;}}return best;}
+// finish the line being drawn; a click and a double-click both land, so near-duplicate points are dropped
+function finishLine(keepTool){const d=S.pending;S.pending=keepTool?S.pending:null;S.hover=null;if(!d)return;
+  const pts=d.filter((q,i)=>i===0||Math.hypot(q[0]-d[i-1][0],q[1]-d[i-1][1])>0.5);
+  if(pts.length>=2){S.atts.push({t:'line',pts:pts.map(q=>({p:q,sm:false}))});S.sel=S.atts.length-1;S.selAP=-1;clearShapeSel();}
+  if(keepTool){S.pending=null;return;}S.tool='select';if(pts.length>=2)changed(false);else refresh();}
 function removeSelected(){
+  const A=S.atts[S.sel];if(A&&A.t==='line'&&S.selAP>=0&&A.pts.length>2){A.pts.splice(S.selAP,1);S.selAP=-1;changed(false);return;}
   const sh=S.holes[S.selHole];
   if(sh&&S.selPts.length&&sh.ctrl.length-S.selPts.length>=3){sh.ctrl=sh.ctrl.filter((_,i)=>!S.selPts.includes(i));S.selPts=[];changed(true);return;}
   if(sh){S.holes.splice(S.selHole,1);S.selHole=-1;S.selPts=[];changed(true);return;}
   if(S.selVerts.length){if(S.ctrl.length-S.selVerts.length>=3){S.ctrl=S.ctrl.filter((_,i)=>!S.selVerts.includes(i));S.selVerts=[];S.shape='custom';changed(true);}return;}
-  if(S.sel>=0){S.atts.splice(S.sel,1);S.sel=-1;changed(false);}
+  if(S.sel>=0){S.atts.splice(S.sel,1);S.sel=-1;S.selAP=-1;changed(false);}
 }
 function reshuffle(){S.seed=(S.seed*9301+49297)%233280||1;RD.key='';schedule(true);}
 
@@ -910,9 +955,9 @@ function reshuffle(){S.seed=(S.seed*9301+49297)%233280||1;RD.key='';schedule(tru
 window.addEventListener('keydown',e=>{
   if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName))return;
   const k=e.key.toLowerCase();
-  if(k==='escape'){closeMenus();$('help').hidden=true;if(S.drawing||S.tool!=='select'){S.drawing=null;S.tool='select';S.pending=null;}else{clearShapeSel();S.marq=null;}refresh();return;}
+  if(k==='escape'){closeMenus();$('help').hidden=true;if(S.drawing||S.tool!=='select'){S.drawing=null;S.tool='select';S.pending=null;}else{clearShapeSel();S.sel=-1;S.selAP=-1;S.marq=null;}refresh();return;}
   if(e.metaKey||e.ctrlKey){if(k==='a'){e.preventDefault();const sh=S.holes[S.selHole];if(sh)S.selPts=sh.ctrl.map((_,i)=>i);else{S.selVerts=S.ctrl.map((_,i)=>i);S.sel=-1;}refresh();}return;}
-  if(k==='enter'){if(S.drawing){e.preventDefault();finishDraw();}return;}
+  if(k==='enter'){if(S.drawing){e.preventDefault();finishDraw();}else if(S.tool==='line'){e.preventDefault();finishLine();}return;}
   if(S.drawing&&!['o','h'].includes(k))return;
   const map={v:'select',o:'outline',p:'point',l:'line',h:'hole'};
   if(map[k]){setTool(map[k]);}
@@ -991,7 +1036,7 @@ window.addEventListener('resize',resize);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 if(document.fonts)document.fonts.ready.then(()=>{defaultImage();rebuild();resize();});
 applyTheme(theme);setTool('select');resize();requestAnimationFrame(tick);
-window.__AP={S,PATTERNS,rebuild,renderScene,buildOutline,roundHole,toSVG,toDXF,built:()=>built,rdStep,rdParams,RD,refresh,setTool,removeSelected};
+window.__AP={S,linePts,PATTERNS,rebuild,renderScene,buildOutline,roundHole,toSVG,toDXF,built:()=>built,rdStep,rdParams,RD,refresh,setTool,removeSelected};
 })();
 // Material slider: filled track up to the thumb
 function fillRange(r){const v=(r.value-r.min)/(r.max-r.min)*100;r.style.setProperty('--p',v+'%');}
